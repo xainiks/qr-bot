@@ -15,14 +15,10 @@ async def start_cmd(message: Message):
 
 @dp.message(F.photo)
 async def scan_qr(message: Message):
-    # Берем самое качественное фото из тех, что прислал телеграм
     photo = message.photo[-1]
     file_info = await bot.get_file(photo.file_id)
-    
-    # Скачиваем файл в байты
     downloaded_file = await bot.download_file(file_info.file_path)
     
-    # Превращаем байты в картинку для OpenCV
     file_bytes = np.asarray(bytearray(downloaded_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
     
@@ -30,14 +26,20 @@ async def scan_qr(message: Message):
         await message.answer("Не удалось прочитать файл картинки.")
         return
 
-    # Используем встроенный в OpenCV детектор QR-кодов
     detector = cv2.QRCodeDetector()
+    
+    # Пробуем найти в оригинале
     val, points, straight_qrcode = detector.detectAndDecode(img)
+    
+    # Если не нашли, инвертируем цвета (для белых QR-кодов на цветном фоне)
+    if not val:
+        inverted_img = cv2.bitwise_not(img)
+        val, points, straight_qrcode = detector.detectAndDecode(inverted_img)
     
     if val:
         await message.answer(f"✅ **QR-код успешно расшифрован:**\n\n{val}", parse_mode="Markdown")
     else:
-        await message.answer("❌ На этой картинке не удалось найти QR-код. Попробуй отправить скриншот целиком или без сжатия (как файл).")
+        await message.answer("❌ На этой картинке не удалось найти QR-код.")
 
 if __name__ == "__main__":
     import asyncio
