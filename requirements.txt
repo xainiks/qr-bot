@@ -1,3 +1,6 @@
 aiogram
 opencv-python
 numpy
+torch
+torchvision
+qreader
