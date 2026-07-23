@@ -4,14 +4,10 @@ import numpy as np
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 from aiogram.filters import CommandStart
-from qreader import QReader
 
 TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
-
-# Инициализируем QReader один раз при запуске бота
-qreader = QReader()
 
 @dp.message(CommandStart())
 async def start_cmd(message: Message):
@@ -30,15 +26,33 @@ async def scan_qr(message: Message):
         await message.answer("Не удалось прочитать файл картинки.")
         return
 
-    # QReader работает с RGB-изображениями (OpenCV по умолчанию открывает в BGR)
-    rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    detector = cv2.QRCodeDetector()
     
-    # Распознаем QR-код с помощью нейросети
-    val = qreader.detect_and_decode(image=rgb_img)
+    # 1. Сначала пробуем прочитать оригинал
+    val, _, _ = detector.detectAndDecode(img)
     
-    # QReader возвращает кортеж/список строк, берем первую найденную
-    if val and val[0]:
-        await message.answer(f"✅ **QR-код успешно расшифрован:**\n\n{val[0]}", parse_mode="Markdown")
+    # 2. Если не получилось, закрашиваем центральную часть белым квадратом (убираем логотип)
+    if not val:
+        h, w, _ = img.shape
+        img_copy = img.copy()
+        
+        # Вычисляем центр картинки и размеры зоны логотипа
+        center_x, center_y = w // 2, h // 2
+        box_size = min(w, h) // 4  # размер квадрата под логотип
+        
+        # Зарисовываем центр белым цветом (255, 255, 255)
+        cv2.rectangle(
+            img_copy, 
+            (center_x - box_size, center_y - box_size), 
+            (center_x + box_size, center_y + box_size), 
+            (255, 255, 255), 
+            -1
+        )
+        
+        val, _, _ = detector.detectAndDecode(img_copy)
+
+    if val:
+        await message.answer(f"✅ **QR-код успешно расшифрован:**\n\n{val}", parse_mode="Markdown")
     else:
         await message.answer("❌ На этой картинке не удалось найти QR-код.")
 
