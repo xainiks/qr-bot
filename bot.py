@@ -4,10 +4,14 @@ import numpy as np
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 from aiogram.filters import CommandStart
+from qreader import QReader
 
 TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
+
+# Инициализируем QReader один раз при запуске бота
+qreader = QReader()
 
 @dp.message(CommandStart())
 async def start_cmd(message: Message):
@@ -26,26 +30,15 @@ async def scan_qr(message: Message):
         await message.answer("Не удалось прочитать файл картинки.")
         return
 
-    detector = cv2.QRCodeDetector()
+    # QReader работает с RGB-изображениями (OpenCV по умолчанию открывает в BGR)
+    rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     
-    # Пробуем найти обычным способом
-    val, _, _ = detector.detectAndDecode(img)
+    # Распознаем QR-код с помощью нейросети
+    val = qreader.detect_and_decode(image=rgb_img)
     
-    # Если не получилось, увеличиваем контраст и пробуем снова
-    if not val:
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        # Улучшаем четкость
-        blurred = cv2.GaussianBlur(gray, (0, 0), 3)
-        sharpened = cv2.addWeighted(gray, 1.5, blurred, -0.5, 0)
-        val, _, _ = detector.detectAndDecode(sharpened)
-
-    # Если всё еще нет, пробуем инверсию
-    if not val:
-        inverted = cv2.bitwise_not(img)
-        val, _, _ = detector.detectAndDecode(inverted)
-
-    if val:
-        await message.answer(f"✅ **QR-код успешно расшифрован:**\n\n{val}", parse_mode="Markdown")
+    # QReader возвращает кортеж/список строк, берем первую найденную
+    if val and val[0]:
+        await message.answer(f"✅ **QR-код успешно расшифрован:**\n\n{val[0]}", parse_mode="Markdown")
     else:
         await message.answer("❌ На этой картинке не удалось найти QR-код.")
 
