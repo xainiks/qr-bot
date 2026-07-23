@@ -1,60 +1,45 @@
-import asyncio
-import logging
 import os
+import cv2
+import numpy as np
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
-from PIL import Image
-import io
-import aiohttp
+from aiogram.filters import CommandStart
 
 TOKEN = os.getenv("BOT_TOKEN")
-
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-@dp.message(F.photo | F.document)
-async def scan_qr(message: Message):
-    try:
-        if message.photo:
-            photo = message.photo[-1]
-        else:
-            if not message.document.mime_type.startswith('image/'):
-                await message.answer("Пожалуйста, отправь картинку с QR-кодом.")
-                return
-            photo = message.document
-
-        file = await bot.get_file(photo.file_id)
-        file_bytes = await bot.download_file(file.file_path)
-        
-        image = Image.open(io.BytesIO(file_bytes.read()))
-        
-        image_byte_arr = io.BytesIO()
-        image.save(image_byte_arr, format='PNG')
-        image_byte_arr.seek(0)
-        
-        async with aiohttp.ClientSession() as session:
-            form = aiohttp.FormData()
-            form.add_field('file', image_byte_arr.read(), filename='qr.png', content_type='image/png')
-            
-            async with session.post('http://api.qrserver.com/v1/read-qr-code/', data=form) as response:
-                result = await response.json()
-                qr_text = result[0]['symbol'][0]['data']
-                
-                if qr_text:
-                    await message.answer(f"Ссылка из QR-кода:\n{qr_text}")
-                else:
-                    await message.answer("На этой картинке не удалось найти QR-код.")
-                    
-    except Exception:
-        await message.answer("Не удалось распознать QR-код. Убедитесь, что картинка четкая.")
-
-@dp.message(F.text == "/start")
+@dp.message(CommandStart())
 async def start_cmd(message: Message):
-    await message.answer("Привет! Отправь мне картинку с QR-кодом, и я вышлю тебе ссылку.")
+    await message.answer("Привет! Отправь мне картинку или скриншот с QR-кодом, и я его расшифрую.")
 
-async def main():
-    logging.basicConfig(level=logging.INFO)
-    print("Бот запущен и готов к работе!")
-    await dp.start_polling(bot)
+@dp.message(F.photo)
+async def scan_qr(message: Message):
+    # Берем самое качественное фото из тех, что прислал телеграм
+    photo = message.photo[-1]
+    file_info = await bot.get_file(photo.file_id)
+    
+    # Скачиваем файл в байты
+    downloaded_file = await bot.download_file(file_info.file_path)
+    
+    # Превращаем байты в картинку для OpenCV
+    file_bytes = np.asarray(bytearray(downloaded_file.read()), dtype=np.uint8)
+    img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+    
+    if img is None:
+        await message.answer("Не удалось прочитать файл картинки.")
+        return
 
-asyncio.run(main())
+    # Используем встроенный в OpenCV детектор QR-кодов
+    detector = cv2.QRCodeDetector()
+    val, points, straight_qrcode = detector.detectAndDecode(img)
+    
+    if val:
+        await message.answer(f"✅ **QR-код успешно расшифрован:**\n\n{val}", parse_mode="Markdown")
+    else:
+        await message.answer("❌ На этой картинке не удалось найти QR-код. Попробуй отправить скриншот целиком или без сжатия (как файл).")
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(dp.start_polling(bot))
+    
