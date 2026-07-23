@@ -1,4 +1,4 @@
-import os
+    import os
 import cv2
 import numpy as np
 from aiogram import Bot, Dispatcher, F
@@ -11,7 +11,7 @@ dp = Dispatcher()
 
 @dp.message(CommandStart())
 async def start_cmd(message: Message):
-    await message.answer("Привет! Отправь мне картинку или скриншот с QR-кодом, и я его расшифрую.")
+    await message.answer("Привет! Отправь мне картинку с QR-кодом, и я его расшифрую.")
 
 @dp.message(F.photo)
 async def scan_qr(message: Message):
@@ -28,33 +28,24 @@ async def scan_qr(message: Message):
 
     detector = cv2.QRCodeDetector()
     
-    # 1. Сначала пробуем прочитать оригинал
-    val, _, _ = detector.detectAndDecode(img)
-    
-    # 2. Если не получилось, закрашиваем центральную часть белым квадратом (убираем логотип)
-    if not val:
-        h, w, _ = img.shape
-        img_copy = img.copy()
-        
-        # Вычисляем центр картинки и размеры зоны логотипа
-        center_x, center_y = w // 2, h // 2
-        box_size = min(w, h) // 4  # размер квадрата под логотип
-        
-        # Зарисовываем центр белым цветом (255, 255, 255)
-        cv2.rectangle(
-            img_copy, 
-            (center_x - box_size, center_y - box_size), 
-            (center_x + box_size, center_y + box_size), 
-            (255, 255, 255), 
-            -1
-        )
-        
-        val, _, _ = detector.detectAndDecode(img_copy)
+    # Пробуем разные варианты (оригинал, ч/б, инверсия для светлых QR на темном фоне)
+    variants = [
+        img,
+        cv2.cvtColor(img, cv2.COLOR_BGR2GRAY),
+        cv2.bitwise_not(img)
+    ]
+
+    val = ""
+    for variant in variants:
+        v, _, _ = detector.detectAndDecode(variant)
+        if v:
+            val = v
+            break
 
     if val:
         await message.answer(f"✅ **QR-код успешно расшифрован:**\n\n{val}", parse_mode="Markdown")
     else:
-        await message.answer("❌ На этой картинке не удалось найти QR-код.")
+        await message.answer("❌ На этой картинке не удалось найти QR-код. Попробуй обрезать скриншот ближе к самому QR-коду.")
 
 # Код для удержания открытого порта на Render
 from http.server import HTTPServer, BaseHTTPRequestHandler
