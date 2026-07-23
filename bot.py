@@ -4,6 +4,7 @@ import numpy as np
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 from aiogram.filters import CommandStart
+from pyzbar.pyzbar import decode
 
 TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=TOKEN)
@@ -26,26 +27,21 @@ async def scan_qr(message: Message):
         await message.answer("Не удалось прочитать файл картинки.")
         return
 
-    detector = cv2.QRCodeDetector()
+    # Используем pyzbar для надежного поиска QR-кода
+    decoded_objects = decode(img)
     
-    # Пробуем найти в оригинале
-    val, points, straight_qrcode = detector.detectAndDecode(img)
-    
-    # Если не нашли, инвертируем цвета (для белых QR-кодов на цветном фоне)
-    if not val:
-        inverted_img = cv2.bitwise_not(img)
-        val, points, straight_qrcode = detector.detectAndDecode(inverted_img)
-    
-    if val:
+    # Если не нашли, пробуем в оттенках серого
+    if not decoded_objects:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        decoded_objects = decode(gray)
+
+    if decoded_objects:
+        val = decoded_objects[0].data.decode('utf-8')
         await message.answer(f"✅ **QR-код успешно расшифрован:**\n\n{val}", parse_mode="Markdown")
     else:
         await message.answer("❌ На этой картинке не удалось найти QR-код.")
 
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(dp.start_polling(bot))
-    
-import os
+# Код для удержания открытого порта на Render
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
@@ -61,3 +57,8 @@ def run_server():
     server.serve_forever()
 
 threading.Thread(target=run_server, daemon=True).start()
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(dp.start_polling(bot))
+    
