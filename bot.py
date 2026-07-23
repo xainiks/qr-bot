@@ -4,7 +4,6 @@ import numpy as np
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 from aiogram.filters import CommandStart
-from pyzbar.pyzbar import decode
 
 TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=TOKEN)
@@ -27,16 +26,25 @@ async def scan_qr(message: Message):
         await message.answer("Не удалось прочитать файл картинки.")
         return
 
-    # Используем pyzbar для надежного поиска QR-кода
-    decoded_objects = decode(img)
+    detector = cv2.QRCodeDetector()
     
-    # Если не нашли, пробуем в оттенках серого
-    if not decoded_objects:
+    # Пробуем найти обычным способом
+    val, _, _ = detector.detectAndDecode(img)
+    
+    # Если не получилось, увеличиваем контраст и пробуем снова
+    if not val:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        decoded_objects = decode(gray)
+        # Улучшаем четкость
+        blurred = cv2.GaussianBlur(gray, (0, 0), 3)
+        sharpened = cv2.addWeighted(gray, 1.5, blurred, -0.5, 0)
+        val, _, _ = detector.detectAndDecode(sharpened)
 
-    if decoded_objects:
-        val = decoded_objects[0].data.decode('utf-8')
+    # Если всё еще нет, пробуем инверсию
+    if not val:
+        inverted = cv2.bitwise_not(img)
+        val, _, _ = detector.detectAndDecode(inverted)
+
+    if val:
         await message.answer(f"✅ **QR-код успешно расшифрован:**\n\n{val}", parse_mode="Markdown")
     else:
         await message.answer("❌ На этой картинке не удалось найти QR-код.")
