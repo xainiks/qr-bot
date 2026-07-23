@@ -1,3 +1,2 @@
 aiogram
-pillow
-aiohttp
+opencv-python
