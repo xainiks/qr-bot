@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 
 TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=TOKEN)
@@ -11,24 +11,49 @@ dp = Dispatcher()
 
 @dp.message(CommandStart())
 async def start_cmd(message: Message):
-    await message.answer("Привет! Отправь мне картинку с QR-кодом, и я его расшифрую.")
+    await message.answer(
+        "👋 Привет! Я бот для распознавания QR-кодов.\n\n"
+        "просто отправь мне картинку или фото с QR-кодом, и я его расшифрую.\n\n"
+        "📋 **Доступные команды:**\n"
+        "/help — помощь и инструкция\n"
+        "/status — проверить работоспособность бота"
+    )
 
-@dp.message(F.photo)
+@dp.message(Command("help"))
+async def help_cmd(message: Message):
+    await message.answer(
+        "💡 **Как пользоваться ботом:**\n"
+        "1. Отправь в чат скриншот или фото, где есть QR-код.\n"
+        "2. Старайся отправлять картинку так, чтобы сам квадрат QR-кода был хорошо виден и не обрезался.\n"
+        "3. Бот мгновенно пришлет тебе расшифрованную ссылку или текст."
+    )
+
+@dp.message(Command("status"))
+async def status_cmd(message: Message):
+    await message.answer("🟢 Бот в сети, работает стабильно и ждет твои картинки!")
+
+@dp.message(F.photo | F.document)
 async def scan_qr(message: Message):
-    photo = message.photo[-1]
-    file_info = await bot.get_file(photo.file_id)
+    # Сразу даем знать, что бот получил файл и приступил к работе
+    processing_msg = await message.answer("🔍 Получил картинку, ищу QR-код...")
+
+    if message.photo:
+        photo = message.photo[-1]
+        file_info = await bot.get_file(photo.file_id)
+    else:
+        file_info = await bot.get_file(message.document.file_id)
+        
     downloaded_file = await bot.download_file(file_info.file_path)
     
     file_bytes = np.asarray(bytearray(downloaded_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
     
     if img is None:
-        await message.answer("Не удалось прочитать файл картинки.")
+        await processing_msg.edit_text("❌ Не удалось прочитать файл картинки.")
         return
 
     detector = cv2.QRCodeDetector()
     
-    # Пробуем разные варианты (оригинал, ч/б, инверсия для светлых QR на темном фоне)
     variants = [
         img,
         cv2.cvtColor(img, cv2.COLOR_BGR2GRAY),
@@ -43,9 +68,9 @@ async def scan_qr(message: Message):
             break
 
     if val:
-        await message.answer(f"✅ **QR-код успешно расшифрован:**\n\n{val}", parse_mode="Markdown")
+        await processing_msg.edit_text(f"✅ **QR-код успешно расшифрован:**\n\n{val}", parse_mode="Markdown")
     else:
-        await message.answer("❌ На этой картинке не удалось найти QR-код. Попробуй обрезать скриншот ближе к самому QR-коду.")
+        await processing_msg.edit_text("❌ На этой картинке не удалось найти QR-код. Попробуй обрезать скриншот ближе к самому QR-коду.")
 
 # Код для удержания открытого порта на Render
 from http.server import HTTPServer, BaseHTTPRequestHandler
