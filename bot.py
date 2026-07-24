@@ -47,7 +47,7 @@ async def scan_qr(message: Message):
     
     val = ""
     
-    # 1. Проверяем через OpenCV (для обычных QR-кодов)
+    # 1. Проверяем через OpenCV
     if img is not None:
         detector = cv2.QRCodeDetector()
         variants = [img, cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), cv2.bitwise_not(img)]
@@ -77,30 +77,39 @@ async def scan_qr(message: Message):
     else:
         await processing_msg.edit_text("❌ На этой картинке не удалось найти код. Попробуй сфотографировать поближе и четче.")
 
+# Простой и надежный обработчик вебхука
 async def handle_webhook(request: web.Request):
-    data = await request.json()
-    update = Update.model_validate(data, context={"bot": bot})
-    await dp.feed_update(bot, update)
-    return web.Response()
+    try:
+        data = await request.json()
+        update = Update.model_validate(data, context={"bot": bot})
+        await dp.feed_update(bot, update)
+    except Exception as e:
+        print(f"Error handling update: {e}")
+    return web.Response(text="OK")
 
 async def handle_ping(request: web.Request):
     return web.Response(text="Bot is running!")
 
-async def on_startup(app):
-    # Принудительно сбрасываем старую очередь и регистрируем чистый вебхук
-    await bot.delete_webhook(drop_pending_updates=True)
-    await bot.set_webhook(WEBHOOK_URL)
-
-async def on_shutdown(app):
-    await bot.delete_webhook()
-
 app = web.Application()
 app.router.add_post(WEBHOOK_PATH, handle_webhook)
 app.router.add_get("/", handle_ping)
-app.on_startup.append(on_startup)
-app.on_shutdown.append(on_shutdown)
+
+async def main():
+    # Устанавливаем вебхук при старте
+    await bot.delete_webhook(drop_pending_updates=True)
+    await bot.set_webhook(WEBHOOK_URL)
+    
+    port = int(os.environ.get("PORT", 10000))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"Server started on port {port}")
+    
+    # Держим приложение запущенным
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    web.run_app(app, host="0.0.0.0", port=port)
+    import asyncio
+    asyncio.run(main())
     
