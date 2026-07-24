@@ -85,6 +85,8 @@ async def handle_ping(request: web.Request):
     return web.Response(text="Bot is running!")
 
 async def on_startup(app):
+    # Сбрасываем старую очередь и старый вебхук в Telegram
+    await bot.delete_webhook(drop_pending_updates=True)
     await bot.set_webhook(WEBHOOK_URL)
 
 async def on_shutdown(app):
