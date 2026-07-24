@@ -1,3 +1,4 @@
 aiogram
-opencv-python
+opencv-python-headless
 numpy
+pyzbar
