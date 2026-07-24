@@ -57,14 +57,16 @@ async def scan_qr(message: Message):
                 val = v
                 break
 
-    # 2. Если OpenCV не нашел, используем асинхронный запрос через aiohttp с правильным закрытием сессии
+    # 2. Если OpenCV не нашел, используем защищенный запрос с тайм-аутом в 5 секунд
     if not val:
         try:
             url = "https://api.qrserver.com/v1/read-qr-code/"
             data = aiohttp.FormData()
             data.add_field('file', file_bytes_array, filename='image.png', content_type='image/png')
             
-            async with aiohttp.ClientSession() as session:
+            # Добавили timeout, чтобы бот не висел вечно
+            client_timeout = aiohttp.ClientTimeout(total=5)
+            async with aiohttp.ClientSession(timeout=client_timeout) as session:
                 async with session.post(url, data=data) as response:
                     res_json = await response.json()
                     if res_json and res_json[0].get("symbol"):
