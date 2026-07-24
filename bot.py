@@ -64,7 +64,6 @@ async def scan_qr(message: Message):
             data = aiohttp.FormData()
             data.add_field('file', file_bytes_array, filename='image.png', content_type='image/png')
             
-            # Добавили timeout, чтобы бот не висел вечно
             client_timeout = aiohttp.ClientTimeout(total=5)
             async with aiohttp.ClientSession(timeout=client_timeout) as session:
                 async with session.post(url, data=data) as response:
@@ -73,13 +72,13 @@ async def scan_qr(message: Message):
                         symbol = res_json[0]["symbol"][0]
                         if symbol.get("data"):
                             val = symbol["data"]
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"API Error or Timeout: {e}")
 
     if val:
         await processing_msg.edit_text(f"✅ **Код успешно расшифрован:**\n\n{val}", parse_mode="Markdown")
     else:
-        await processing_msg.edit_text("❌ На этой картинке не удалось найти код. Попробуй сфотографировать поближе и четче.")
+        await processing_msg.edit_text("❌ Не удалось расшифровать этот код или вышло время ожидания.")
 
 async def handle_webhook(request: web.Request):
     try:
