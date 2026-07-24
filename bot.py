@@ -32,39 +32,43 @@ async def status_cmd(message: Message):
 @dp.message(F.photo | F.document)
 async def scan_qr(message: Message):
     processing_msg = await message.answer("🔍 Ищу код на картинке...")
-
-    if message.photo:
-        photo = message.photo[-1]
-        file_info = await bot.get_file(photo.file_id)
-    else:
-        file_info = await bot.get_file(message.document.file_id)
-        
-    downloaded_file = await bot.download_file(file_info.file_path)
-    file_bytes_array = downloaded_file.read()
-    
-    img_np = np.asarray(bytearray(file_bytes_array), dtype=np.uint8)
-    img = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
-    
     val = ""
     
-    # 1. Проверяем через OpenCV
-    if img is not None:
-        detector = cv2.QRCodeDetector()
-        variants = [img, cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), cv2.bitwise_not(img)]
-        for variant in variants:
-            v, _, _ = detector.detectAndDecode(variant)
-            if v:
-                val = v
-                break
+    try:
+        if message.photo:
+            photo = message.photo[-1]
+            file_info = await bot.get_file(photo.file_id)
+        else:
+            file_info = await bot.get_file(message.document.file_id)
+            
+        downloaded_file = await bot.download_file(file_info.file_path)
+        file_bytes_array = downloaded_file.read()
+        
+        # Экономим оперативку: если картинка огромная, сжимаем её для OpenCV
+        img_np = np.asarray(bytearray(file_bytes_array), dtype=np.uint8)
+        img = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
+        
+        if img is not None:
+            # Если разрешение слишком большое, уменьшаем вдвое для экономии памяти и ускорения
+            height, width = img.shape[:2]
+            if max(height, width) > 1280:
+                img = cv2.resize(img, (width // 2, height // 2), interpolation=cv2.INTER_AREA)
 
-    # 2. Если OpenCV не нашел, используем защищенный запрос с тайм-аутом в 5 секунд
-    if not val:
-        try:
+            detector = cv2.QRCodeDetector()
+            variants = [img, cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), cv2.bitwise_not(img)]
+            for variant in variants:
+                v, _, _ = detector.detectAndDecode(variant)
+                if v:
+                    val = v
+                    break
+
+        # Если OpenCV не нашел, используем быстрый запрос с жестким тайм-аутом в 4 секунды
+        if not val:
             url = "https://api.qrserver.com/v1/read-qr-code/"
             data = aiohttp.FormData()
             data.add_field('file', file_bytes_array, filename='image.png', content_type='image/png')
             
-            client_timeout = aiohttp.ClientTimeout(total=5)
+            client_timeout = aiohttp.ClientTimeout(total=4)
             async with aiohttp.ClientSession(timeout=client_timeout) as session:
                 async with session.post(url, data=data) as response:
                     res_json = await response.json()
@@ -72,13 +76,18 @@ async def scan_qr(message: Message):
                         symbol = res_json[0]["symbol"][0]
                         if symbol.get("data"):
                             val = symbol["data"]
-        except Exception as e:
-            print(f"API Error or Timeout: {e}")
+                            
+    except Exception as e:
+        print(f"Error processing image: {e}")
 
-    if val:
-        await processing_msg.edit_text(f"✅ **Код успешно расшифрован:**\n\n{val}", parse_mode="Markdown")
-    else:
-        await processing_msg.edit_text("❌ Не удалось расшифровать этот код или вышло время ожидания.")
+    # Гарантированно обновляем статусное сообщение в любом случае (успех или неудача)
+    try:
+        if val:
+            await processing_msg.edit_text(f"✅ **Код успешно расшифрован:**\n\n{val}", parse_mode="Markdown")
+        else:
+            await processing_msg.edit_text("❌ На этой картинке не удалось найти код или вышло время ожидания.")
+    except Exception:
+        pass
 
 async def handle_webhook(request: web.Request):
     try:
