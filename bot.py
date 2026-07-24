@@ -17,13 +17,13 @@ dp = Dispatcher()
 @dp.message(CommandStart())
 async def start_cmd(message: Message):
     await message.answer(
-        "👋 Привет! Я бот для распознавания QR-кодов.\n\n"
-        "Отправь мне картинку или фото с QR-кодом, и я его расшифрую."
+        "👋 Привет! Я бот для распознавания QR и матричных кодов.\n\n"
+        "Отправь мне картинку или фото с кодом, и я его расшифрую."
     )
 
 @dp.message(Command("help"))
 async def help_cmd(message: Message):
-    await message.answer("💡 Отправь скриншот или фото с QR-кодом, и бот выдаст результат.")
+    await message.answer("💡 Отправь скриншот или фото с кодом, и бот выдаст результат.")
 
 @dp.message(Command("status"))
 async def status_cmd(message: Message):
@@ -47,7 +47,7 @@ async def scan_qr(message: Message):
     
     val = ""
     
-    # 1. Проверяем через OpenCV
+    # 1. Проверяем через OpenCV (для обычных QR-кодов)
     if img is not None:
         detector = cv2.QRCodeDetector()
         variants = [img, cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), cv2.bitwise_not(img)]
@@ -57,23 +57,25 @@ async def scan_qr(message: Message):
                 val = v
                 break
 
-    # 2. Если OpenCV не справился, отправляем на внешнее API
+    # 2. Если OpenCV не нашел, используем онлайн-декодер для матричных кодов
     if not val:
         try:
             response = requests.post(
                 "https://api.qrserver.com/v1/read-qr-code/",
-                files={"file": ("qr.png", file_bytes_array)}
+                files={"file": ("image.png", file_bytes_array)}
             )
             res_json = response.json()
-            if res_json and res_json[0]["symbol"][0]["data"]:
-                val = res_json[0]["symbol"][0]["data"]
+            if res_json and res_json[0].get("symbol"):
+                symbol = res_json[0]["symbol"][0]
+                if symbol.get("data"):
+                    val = symbol["data"]
         except Exception:
             pass
 
     if val:
         await processing_msg.edit_text(f"✅ **Код успешно расшифрован:**\n\n{val}", parse_mode="Markdown")
     else:
-        await processing_msg.edit_text("❌ На этой картинке не удалось найти код.")
+        await processing_msg.edit_text("❌ На этой картинке не удалось найти код. Попробуй сфотографировать поближе и четче.")
 
 async def handle_webhook(request: web.Request):
     data = await request.json()
@@ -85,7 +87,7 @@ async def handle_ping(request: web.Request):
     return web.Response(text="Bot is running!")
 
 async def on_startup(app):
-    # Сбрасываем старую очередь и старый вебхук в Telegram
+    # Принудительно сбрасываем старую очередь и регистрируем чистый вебхук
     await bot.delete_webhook(drop_pending_updates=True)
     await bot.set_webhook(WEBHOOK_URL)
 
