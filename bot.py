@@ -6,9 +6,9 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, Update
 from aiogram.filters import CommandStart, Command
+from pylibdmtx.pylibdmtx import decode as decode_dmtx  # Импортируем детектор Data Matrix
 
 TOKEN = os.getenv("BOT_TOKEN")
-# Используем твой точный адрес с Render
 WEBHOOK_URL = f"https://qr-bot-c80q.onrender.com/webhook/{TOKEN}"
 WEBHOOK_PATH = f"/webhook/{TOKEN}"
 
@@ -18,13 +18,13 @@ dp = Dispatcher()
 @dp.message(CommandStart())
 async def start_cmd(message: Message):
     await message.answer(
-        "👋 Привет! Я бот для распознавания QR-кодов.\n\n"
-        "Отправь мне картинку или фото с QR-кодом, и я его расшифрую."
+        "👋 Привет! Я бот для распознавания QR и Data Matrix кодов.\n\n"
+        "Отправь мне картинку или фото с кодом, и я его расшифрую."
     )
 
 @dp.message(Command("help"))
 async def help_cmd(message: Message):
-    await message.answer("💡 Отправь скриншот или фото с QR-кодом, и бот выдаст результат.")
+    await message.answer("💡 Отправь скриншот или фото с кодом (включая точечные Data Matrix), и бот выдаст результат.")
 
 @dp.message(Command("status"))
 async def status_cmd(message: Message):
@@ -32,7 +32,7 @@ async def status_cmd(message: Message):
 
 @dp.message(F.photo | F.document)
 async def scan_qr(message: Message):
-    processing_msg = await message.answer("🔍 Получил картинку, ищу QR-код...")
+    processing_msg = await message.answer("🔍 Анализирую код на картинке...")
 
     if message.photo:
         photo = message.photo[-1]
@@ -43,12 +43,22 @@ async def scan_qr(message: Message):
     downloaded_file = await bot.download_file(file_info.file_path)
     file_bytes_array = downloaded_file.read()
     
-    # 1. Пробуем OpenCV
     img_np = np.asarray(bytearray(file_bytes_array), dtype=np.uint8)
     img = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
     
     val = ""
+    
+    # 1. Сначала проверяем через Pylibdmtx (специально для точечных Data Matrix кодов)
     if img is not None:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray = cv2.equalizeHist(gray) # Повышаем контраст
+        
+        decoded_objects = decode_dmtx(gray)
+        if decoded_objects:
+            val = decoded_objects[0].data.decode('utf-8')
+
+    # 2. Если не нашли Data Matrix, пробуем классический OpenCV QR-детектор
+    if not val and img is not None:
         detector = cv2.QRCodeDetector()
         variants = [img, cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), cv2.bitwise_not(img)]
         for variant in variants:
@@ -57,7 +67,7 @@ async def scan_qr(message: Message):
                 val = v
                 break
 
-    # 2. Если OpenCV не справился, отправляем на API
+    # 3. Если всё еще пусто, отправляем на внешнее API для подстраховки
     if not val:
         try:
             response = requests.post(
@@ -71,11 +81,11 @@ async def scan_qr(message: Message):
             pass
 
     if val:
-        await processing_msg.edit_text(f"✅ **QR-код успешно расшифрован:**\n\n{val}", parse_mode="Markdown")
+        await processing_msg.edit_text(f"✅ **Код успешно расшифрован:**\n\n{val}", parse_mode="Markdown")
     else:
-        await processing_msg.edit_text("❌ На этой картинке не удалось найти QR-код.")
+        await processing_msg.edit_text("❌ На этой картинке не удалось найти код. Попробуй сделать фото чуть ровнее.")
 
-# Настройка aiohttp сервера для Webhook
+# Настройка aiohttp для Webhook
 async def handle_webhook(request: web.Request):
     data = await request.json()
     update = Update.model_validate(data, context={"bot": bot})
