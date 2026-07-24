@@ -1,6 +1,7 @@
 import os
 import cv2
 import numpy as np
+from pyzbar.pyzbar import decode
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 from aiogram.filters import CommandStart, Command
@@ -23,7 +24,7 @@ async def start_cmd(message: Message):
 async def help_cmd(message: Message):
     await message.answer(
         "💡 **Как пользоваться:**\n"
-        "Отправь скриншот или фото с QR-кодом, и бот выдаст результат."
+        "Отправь скриншот или фото с QR-кодом (даже с логотипом в центре), и бот выдаст результат."
     )
 
 @dp.message(Command("status"))
@@ -50,25 +51,25 @@ async def scan_qr(message: Message):
         return
 
     val = ""
-    detector = cv2.QRCodeDetector()
-    variants = [
-        img,
-        cv2.cvtColor(img, cv2.COLOR_BGR2GRAY),
-        cv2.bitwise_not(img)
-    ]
-    
-    for variant in variants:
-        v, _, _ = detector.detectAndDecode(variant)
-        if v:
-            val = v
-            break
+    # Сначала проверяем через pyzbar (он отлично видит коды с логотипами в центре)
+    decoded_objects = decode(img)
+    if decoded_objects:
+        val = decoded_objects[0].data.decode('utf-8')
+    else:
+        # Запасной вариант через OpenCV
+        detector = cv2.QRCodeDetector()
+        variants = [img, cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), cv2.bitwise_not(img)]
+        for variant in variants:
+            v, _, _ = detector.detectAndDecode(variant)
+            if v:
+                val = v
+                break
 
     if val:
         await processing_msg.edit_text(f"✅ **QR-код успешно расшифрован:**\n\n{val}", parse_mode="Markdown")
     else:
         await processing_msg.edit_text("❌ На этой картинке не удалось найти QR-код. Попробуй обрезать скриншот ближе к самому QR-коду.")
 
-# Удержание порта для Render
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
