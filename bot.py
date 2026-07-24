@@ -1,7 +1,7 @@
 import os
 import cv2
 import numpy as np
-import requests
+import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, Update
@@ -57,18 +57,20 @@ async def scan_qr(message: Message):
                 val = v
                 break
 
-    # 2. Если OpenCV не нашел, используем онлайн-декодер для матричных кодов
+    # 2. Если OpenCV не нашел, используем асинхронный запрос через aiohttp с правильным закрытием сессии
     if not val:
         try:
-            response = requests.post(
-                "https://api.qrserver.com/v1/read-qr-code/",
-                files={"file": ("image.png", file_bytes_array)}
-            )
-            res_json = response.json()
-            if res_json and res_json[0].get("symbol"):
-                symbol = res_json[0]["symbol"][0]
-                if symbol.get("data"):
-                    val = symbol["data"]
+            url = "https://api.qrserver.com/v1/read-qr-code/"
+            data = aiohttp.FormData()
+            data.add_field('file', file_bytes_array, filename='image.png', content_type='image/png')
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, data=data) as response:
+                    res_json = await response.json()
+                    if res_json and res_json[0].get("symbol"):
+                        symbol = res_json[0]["symbol"][0]
+                        if symbol.get("data"):
+                            val = symbol["data"]
         except Exception:
             pass
 
@@ -77,7 +79,6 @@ async def scan_qr(message: Message):
     else:
         await processing_msg.edit_text("❌ На этой картинке не удалось найти код. Попробуй сфотографировать поближе и четче.")
 
-# Простой и надежный обработчик вебхука
 async def handle_webhook(request: web.Request):
     try:
         data = await request.json()
@@ -95,7 +96,6 @@ app.router.add_post(WEBHOOK_PATH, handle_webhook)
 app.router.add_get("/", handle_ping)
 
 async def main():
-    # Устанавливаем вебхук при старте
     await bot.delete_webhook(drop_pending_updates=True)
     await bot.set_webhook(WEBHOOK_URL)
     
@@ -106,7 +106,6 @@ async def main():
     await site.start()
     print(f"Server started on port {port}")
     
-    # Держим приложение запущенным
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
