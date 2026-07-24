@@ -16,6 +16,7 @@ dp = Dispatcher()
 
 @dp.message(CommandStart())
 async def start_cmd(message: Message):
+    print(f"[LOG] User {message.from_user.id} started the bot.")
     await message.answer(
         "👋 Привет! Я бот для распознавания QR и матричных кодов.\n\n"
         "Отправь мне картинку или фото с кодом, и я его расшифрую."
@@ -27,10 +28,12 @@ async def help_cmd(message: Message):
 
 @dp.message(Command("status"))
 async def status_cmd(message: Message):
+    print("[LOG] Status command checked.")
     await message.answer("🟢 Бот в сети и работает через Webhook!")
 
 @dp.message(F.photo | F.document)
 async def scan_qr(message: Message):
+    print(f"[LOG] Received an image/document from user {message.from_user.id}")
     processing_msg = await message.answer("🔍 Ищу код на картинке...")
     val = ""
     
@@ -41,29 +44,30 @@ async def scan_qr(message: Message):
         else:
             file_info = await bot.get_file(message.document.file_id)
             
+        print(f"[LOG] Downloading file from Telegram: {file_info.file_path}")
         downloaded_file = await bot.download_file(file_info.file_path)
         file_bytes_array = downloaded_file.read()
         
-        # Экономим оперативку: если картинка огромная, сжимаем её для OpenCV
         img_np = np.asarray(bytearray(file_bytes_array), dtype=np.uint8)
         img = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
         
         if img is not None:
-            # Если разрешение слишком большое, уменьшаем вдвое для экономии памяти и ускорения
             height, width = img.shape[:2]
             if max(height, width) > 1280:
                 img = cv2.resize(img, (width // 2, height // 2), interpolation=cv2.INTER_AREA)
 
+            print("[LOG] Starting OpenCV detection...")
             detector = cv2.QRCodeDetector()
             variants = [img, cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), cv2.bitwise_not(img)]
             for variant in variants:
                 v, _, _ = detector.detectAndDecode(variant)
                 if v:
                     val = v
+                    print(f"[LOG] OpenCV successfully found code: {val}")
                     break
 
-        # Если OpenCV не нашел, используем быстрый запрос с жестким тайм-аутом в 4 секунды
         if not val:
+            print("[LOG] OpenCV missed. Trying external QR API...")
             url = "https://api.qrserver.com/v1/read-qr-code/"
             data = aiohttp.FormData()
             data.add_field('file', file_bytes_array, filename='image.png', content_type='image/png')
@@ -76,18 +80,20 @@ async def scan_qr(message: Message):
                         symbol = res_json[0]["symbol"][0]
                         if symbol.get("data"):
                             val = symbol["data"]
+                            print(f"[LOG] External API successfully found code: {val}")
                             
     except Exception as e:
-        print(f"Error processing image: {e}")
+        print(f"[ERROR] Exception during processing image: {e}")
 
-    # Гарантированно обновляем статусное сообщение в любом случае (успех или неудача)
     try:
         if val:
             await processing_msg.edit_text(f"✅ **Код успешно расшифрован:**\n\n{val}", parse_mode="Markdown")
+            print("[LOG] Result sent to user successfully.")
         else:
             await processing_msg.edit_text("❌ На этой картинке не удалось найти код или вышло время ожидания.")
-    except Exception:
-        pass
+            print("[LOG] Code not found message sent.")
+    except Exception as e:
+        print(f"[ERROR] Could not edit processing message: {e}")
 
 async def handle_webhook(request: web.Request):
     try:
@@ -95,7 +101,7 @@ async def handle_webhook(request: web.Request):
         update = Update.model_validate(data, context={"bot": bot})
         await dp.feed_update(bot, update)
     except Exception as e:
-        print(f"Error handling update: {e}")
+        print(f"[ERROR] Handling webhook update: {e}")
     return web.Response(text="OK")
 
 async def handle_ping(request: web.Request):
@@ -114,7 +120,7 @@ async def main():
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    print(f"Server started on port {port}")
+    print(f"[LOG] Server successfully started on port {port}")
     
     await asyncio.Event().wait()
 
