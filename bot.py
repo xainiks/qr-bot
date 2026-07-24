@@ -2,6 +2,7 @@ import os
 import cv2
 import numpy as np
 import aiohttp
+import asyncio
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, Update
@@ -38,35 +39,36 @@ async def scan_qr(message: Message):
     val = ""
     
     try:
-        if message.photo:
-            photo = message.photo[-1]
-            file_info = await bot.get_file(photo.file_id)
-        else:
-            file_info = await bot.get_file(message.document.file_id)
+        # Заворачиваем загрузку и поиск в жесткий тайм-аут 8 секунд, чтобы бот не зависал
+        async def process_image_task():
+            nonlocal val
+            if message.photo:
+                photo = message.photo[-1]
+                file_info = await bot.get_file(photo.file_id)
+            else:
+                file_info = await bot.get_file(message.document.file_id)
+                
+            print(f"[LOG] Downloading file from Telegram: {file_info.file_path}")
+            downloaded_file = await bot.download_file(file_info.file_path)
+            file_bytes_array = downloaded_file.read()
             
-        print(f"[LOG] Downloading file from Telegram: {file_info.file_path}")
-        downloaded_file = await bot.download_file(file_info.file_path)
-        file_bytes_array = downloaded_file.read()
-        
-        img_np = np.asarray(bytearray(file_bytes_array), dtype=np.uint8)
-        img = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
-        
-        if img is not None:
-            height, width = img.shape[:2]
-            if max(height, width) > 1280:
-                img = cv2.resize(img, (width // 2, height // 2), interpolation=cv2.INTER_AREA)
+            img_np = np.asarray(bytearray(file_bytes_array), dtype=np.uint8)
+            img = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
+            
+            if img is not None:
+                height, width = img.shape[:2]
+                if max(height, width) > 1280:
+                    img = cv2.resize(img, (width // 2, height // 2), interpolation=cv2.INTER_AREA)
 
-            print("[LOG] Starting OpenCV detection...")
-            detector = cv2.QRCodeDetector()
-            variants = [img, cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), cv2.bitwise_not(img)]
-            for variant in variants:
-                v, _, _ = detector.detectAndDecode(variant)
-                if v:
-                    val = v
-                    print(f"[LOG] OpenCV successfully found code: {val}")
-                    break
+                print("[LOG] Starting OpenCV detection...")
+                detector = cv2.QRCodeDetector()
+                variants = [img, cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), cv2.bitwise_not(img)]
+                for variant in variants:
+                    v, _, _ = detector.detectAndDecode(variant)
+                    if v:
+                        print(f"[LOG] OpenCV found code: {v}")
+                        return v
 
-        if not val:
             print("[LOG] OpenCV missed. Trying external QR API...")
             url = "https://api.qrserver.com/v1/read-qr-code/"
             data = aiohttp.FormData()
@@ -79,12 +81,18 @@ async def scan_qr(message: Message):
                     if res_json and res_json[0].get("symbol"):
                         symbol = res_json[0]["symbol"][0]
                         if symbol.get("data"):
-                            val = symbol["data"]
-                            print(f"[LOG] External API successfully found code: {val}")
+                            print(f"[LOG] External API found code: {symbol['data']}")
+                            return symbol["data"]
+            return ""
+
+        val = await asyncio.wait_for(process_image_task(), timeout=8.0)
                             
+    except asyncio.TimeoutError:
+        print("[ERROR] Processing timed out completely.")
     except Exception as e:
         print(f"[ERROR] Exception during processing image: {e}")
 
+    # Гарантированно обновляем статусное сообщение в любом случае
     try:
         if val:
             await processing_msg.edit_text(f"✅ **Код успешно расшифрован:**\n\n{val}", parse_mode="Markdown")
@@ -125,6 +133,5 @@ async def main():
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
-    
+                                     
